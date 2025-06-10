@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>本機 T-SHIRT + 插畫 合成 Demo</title>
+  <style>
+    body { font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; background: #f5f5f5; margin: 0; padding: 20px;}
+    h1 { text-align: center; margin-bottom: 20px;}
+    #controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-bottom: 20px; align-items: center;}
+    #controls label { display: block; font-size: 14px; margin-bottom: 4px;}
+    #controls input { width: 100%; font-size: 16px; padding: 6px 8px; box-sizing: border-box;}
+    /* Removed #auto-fields styling */
+    #action-bar { display: flex; gap: 20px; justify-content: center; align-items: center; margin: 24px 0 24px 0;}
+    #action-bar button { font-size: 16px; padding: 8px 18px; cursor: pointer; }
+    #preview-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 24px; margin-bottom: 20px;}
+    .tshirt-block { background: #fff; border: 2px solid #a3c8ff; border-radius: 10px; padding: 12px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.07); cursor: pointer; transition: border 0.15s;}
+    .tshirt-block.canvas-large { grid-column: span 2;}
+    .tshirt-block canvas { border: 1px solid #ccc; max-width: 100%; cursor: grab;}
+    .tshirt-block canvas:active { cursor: grabbing;}
+    .tshirt-info { margin-top: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px;}
+    .link-input { font-size: 15px; padding: 4px 6px; width: 100%; box-sizing: border-box; border: 1px solid #aaa; border-radius: 4px;}
+    .tshirt-block input[type="checkbox"] {
+      transform: scale(1.6); margin: 0 10px 0 0; accent-color: #297aff; vertical-align: middle;
+    }
+    .tshirt-info label { cursor: pointer; font-size: 17px; margin-top: 2px;}
+    .tshirt-block.selected { border-color: #297aff; box-shadow: 0 0 8px #82b4ff50; }
+  </style>
+</head>
+<body>
+  <h1>本機 T-SHIRT + 插畫 合成 Demo</h1>
+  <div id="controls">
+    <div>
+      <label for="itemCode">圖號：</label>
+      <input type="text" id="itemCode" placeholder="輸入完整圖號 (例：103380009)" />
+    </div>
+    <div>
+      <label for="supplierId">供應商ID：</label>
+      <input type="text" id="supplierId" readonly />
+    </div>
+    <div>
+      <label for="supplierName">供應商：</label>
+      <input type="text" id="supplierName" readonly />
+    </div>
+    <div>
+      <label for="uploadIllustration">上傳插畫 (PNG)：</label>
+      <input type="file" id="uploadIllustration" accept="image/png" />
+    </div>
+  </div>
+
+  <!-- Removed: 自動欄位顯示區 -->
+
+  <div id="action-bar">
+    <button id="selectAllBtn">全選</button>
+    <button id="deselectAllBtn">全不選</button>
+    <button id="downloadImagesBtn">下載所有勾選示意圖</button>
+  </div>
+  <div id="preview-container"></div>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <script>
+    // Fixed 8 colors for T-shirts
+    const COLORS = [
+      { name: '黑色', file: 'img/3500101-002.png' },
+      { name: '白色', file: 'img/3500101-001.png' },
+      { name: '薄荷綠', file: 'img/3500101-024.png' },
+      { name: '墨綠色', file: 'img/3500101-035.png' },
+      { name: '酒紅色', file: 'img/3500101-072.png' },
+      { name: '深藍色', file: 'img/3500101-082.png' },
+      { name: '淺粉紅', file: 'img/3500101-497.png' },
+      { name: '深卡其', file: 'img/3500101-537.png' }
+    ];
+    let tshirtImages = [], canvases = [], canvasesCtx = [], overlayImage = null;
+    // State for managing the overlay illustration's position and scale
+    let overlayState = { x: 0, y: 0, scale: 1, width: 0, height: 0, dragging: false, offsetX: 0, offsetY: 0 };
+    let supplierData = [];
+
+    // Ensure the DOM is fully loaded before initializing
+    window.addEventListener('DOMContentLoaded', () => {
+      // Load supplier database from Excel and then initialize T-shirt display
+      loadSupplierDatabase().finally(initTshirt);
+      // Event listeners for select all and deselect all buttons
+      document.getElementById('selectAllBtn').onclick = () => setAllCheckbox(true);
+      document.getElementById('deselectAllBtn').onclick = () => setAllCheckbox(false);
+    });
+
+    // Function to set all checkboxes to a given state
+    function setAllCheckbox(state) {
+      COLORS.forEach((c, idx) => {
+        const chk = document.getElementById('chk-' + idx);
+        chk.checked = state;
+        updateCardSelection(idx, state); // Update card visual selection
+      });
+    }
+
+    // Asynchronously load supplier data from 'database.xlsx'
+    async function loadSupplierDatabase() {
+      try {
+        const resp = await fetch('database.xlsx');
+        const ab = await resp.arrayBuffer();
+        const wb = XLSX.read(ab, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        supplierData = XLSX.utils.sheet_to_json(ws, { header: 1 }); // Convert sheet to JSON array
+        console.log('資料庫載入成功。供應商資料行數:', supplierData.length); // DEBUG: Log loaded data size
+        // Use console.table for better visualization of the array of arrays
+        console.log('載入的供應商資料範例 (前5行):');
+        console.table(supplierData.slice(0, 5)); // DEBUG: Log first 5 rows in a table format for inspection
+      } catch (e) {
+        console.error('讀取 database.xlsx 失敗', e);
+        console.log('請確認 database.xlsx 檔案是否存在且格式正確。'); // DEBUG: Add helpful message
+      }
+    }
+
+    // Initialize T-shirt display blocks and canvases
+    function initTshirt() {
+      const container = document.getElementById('preview-container');
+      container.innerHTML = ''; // Clear existing content
+
+      COLORS.forEach((c, idx) => {
+        const block = document.createElement('div');
+        block.className = 'tshirt-block' + (idx === 0 ? ' canvas-large' : ''); // Make first canvas larger
+        block.tabIndex = 0; // Make div focusable
+        // Handle click on the block to toggle checkbox, unless target is checkbox or input
+        block.onclick = e => {
+          if (e.target.type !== 'checkbox' && e.target.className !== 'link-input') {
+            const chk = document.getElementById('chk-' + idx);
+            chk.checked = !chk.checked;
+            updateCardSelection(idx, chk.checked);
+          }
+        };
+
+        const canvas = document.createElement('canvas');
+        canvas.id = 'canvas-' + idx;
+        block.appendChild(canvas);
+
+        const info = document.createElement('div');
+        info.className = 'tshirt-info';
+
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.id = 'chk-' + idx;
+        chk.checked = true; // Initially checked
+        chk.onclick = e => {
+          e.stopPropagation(); // Prevent block click from triggering
+          updateCardSelection(idx, chk.checked);
+        };
+
+        const lbl = document.createElement('label');
+        lbl.htmlFor = 'chk-' + idx;
+        lbl.innerText = c.name;
+        lbl.onclick = e => { e.stopPropagation(); }; // Prevent block click from triggering
+
+        const link = document.createElement('input');
+        link.type = 'text';
+        link.className = 'link-input';
+        link.id = 'link-' + idx;
+        link.placeholder = '圖片雲端連結';
+        link.onclick = e => e.stopPropagation(); // Prevent block click from triggering
+
+        info.append(chk, lbl, link);
+        block.appendChild(info);
+        container.appendChild(block);
+
+        canvases[idx] = canvas;
+        canvasesCtx[idx] = canvas.getContext('2d');
+        updateCardSelection(idx, true); // Set initial selected state
+      });
+
+      // Event listener for item code input change
+      document.getElementById('itemCode').addEventListener('input', onCodeChange);
+      // Event listener for illustration file upload
+      document.getElementById('uploadIllustration').addEventListener('change', e => {
+        const f = e.target.files[0];
+        if (!f) return;
+
+        // Extract item code from filename
+        const fname = f.name.split('.')[0].slice(0, 9);
+        document.getElementById('itemCode').value = fname;
+        onCodeChange({ target: { value: fname } }); // Manually trigger change event
+
+        const rf = new FileReader();
+        rf.onload = ev => {
+          const img = new Image();
+          img.src = ev.target.result;
+          img.onload = () => {
+            overlayImage = img;
+            overlayState.width = img.naturalWidth;
+            overlayState.height = img.naturalHeight;
+
+            // Scale down if illustration is too large for the main canvas
+            const maxW = canvases[0].width * 0.5;
+            if (overlayState.width > maxW) {
+              const ratio = maxW / overlayState.width;
+              overlayState.width *= ratio;
+              overlayState.height *= ratio;
+              overlayState.scale = 1; // Reset scale after initial fit
+            }
+
+            // Center the illustration on the first canvas
+            overlayState.x = (canvases[0].width - overlayState.width * overlayState.scale) / 2;
+            overlayState.y = (canvases[0].height - overlayState.height * overlayState.scale) / 2;
+            redrawAll(); // Redraw all canvases with the new illustration
+          };
+        };
+        rf.readAsDataURL(f);
+      });
+      // Event listener for download button
+      document.getElementById('downloadImagesBtn').addEventListener('click', downloadImages);
+      loadAllImages(); // Start loading T-shirt base images
+    }
+
+    // Update the visual state of the card (add/remove 'selected' class)
+    function updateCardSelection(idx, checked) {
+      const block = document.getElementsByClassName('tshirt-block')[idx];
+      if (checked) {
+        block.classList.add('selected');
+      } else {
+        block.classList.remove('selected');
+      }
+    }
+
+    // Handle changes in the item code input
+    function onCodeChange(e) {
+      const code = e.target.value.trim();
+      const id = code.length >= 6 ? code.slice(0, 6) : ''; // Extract first 6 digits from itemCode for lookup ID
+      document.getElementById('supplierId').value = id; // Display the extracted ID
+      console.log('圖號 (itemCode):', code, '提取的供應商ID (extractedId):', id); // DEBUG: Log itemCode and extracted ID
+
+      let name = ''; // To store supplier name
+
+      if (id && supplierData.length > 1) { // Ensure supplierData has data beyond just headers
+        console.log('開始在供應商資料中搜尋，資料行數:', supplierData.length); // DEBUG: Confirm search start
+        // Search for supplier data in the loaded Excel data
+        for (let i = 1; i < supplierData.length; i++) { // Start from index 1 to skip header row
+          const row = supplierData[i];
+          // Use default empty string if cell is null/undefined to prevent errors during trim/replace
+          const supplierIdFromB = String(row[1] || '').replace(/\s/g, '').trim(); // Get supplier ID from Column B (index 1) and clean it
+          const supplierNameFromD = String(row[3] || '').trim(); // Get supplier name from Column D (index 3) and clean it
+
+          console.log(`搜尋行 ${i}: B欄值 (清理後) - "${supplierIdFromB}", D欄值 (清理後) - "${supplierNameFromD}"`); // DEBUG: Log current row values
+
+          // Compare the extracted item code ID with the supplier ID from Column B
+          if (supplierIdFromB === id) { // Corrected variable name from cleanedSupplierIdFromB to supplierIdFromB
+            name = supplierNameFromD; // Assign the cleaned supplier name
+            console.log('找到匹配！供應商名稱:', name); // DEBUG: Log successful match
+            break; // Found a match, exit loop
+          }
+        }
+      } else {
+        console.log('未有圖號輸入或供應商資料未載入。'); // DEBUG: Info if no ID or data
+      }
+      document.getElementById('supplierName').value = name; // Update supplier name display
+    }
+
+    // Load all T-shirt base images
+    function loadAllImages() {
+      let loadedCount = 0;
+      COLORS.forEach((c, idx) => {
+        const img = new Image();
+        img.src = c.file;
+        img.onload = () => {
+          tshirtImages[idx] = img;
+          loadedCount++;
+          if (loadedCount === COLORS.length) setupCanvases();
+        };
+        img.onerror = () => {
+          console.error(`Failed to load T-shirt image: ${c.file}. Using fallback size for canvas.`);
+          tshirtImages[idx] = null; // Mark as failed
+          loadedCount++;
+          if (loadedCount === COLORS.length) setupCanvases();
+        };
+      });
+    }
+
+    // Set up canvas dimensions and draw initial T-shirt images
+    function setupCanvases() {
+      const defaultCanvasWidth = 600; // Standard size for T-shirt mockups
+      const defaultCanvasHeight = 600;
+
+      canvases.forEach((canvas, idx) => {
+        const img = tshirtImages[idx];
+        const ctx = canvasesCtx[idx];
+
+        if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          ctx.drawImage(img, 0, 0);
+        } else {
+          // Set a default size and clear the canvas if image failed to load
+          canvas.width = defaultCanvasWidth;
+          canvas.height = defaultCanvasHeight;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          // Optionally draw a placeholder text if image failed
+          ctx.fillStyle = '#ccc';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = '#666';
+          ctx.font = '20px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('圖片載入失敗', canvas.width / 2, canvas.height / 2);
+        }
+      });
+
+      // Recalculate overlay position relative to the (potentially resized) first canvas
+      if (canvases[0]) {
+        if (overlayImage && overlayState.width === 0 && overlayState.height === 0) {
+          overlayState.width = overlayImage.naturalWidth || 100; // Fallback to 100 if naturalWidth is 0
+          overlayState.height = overlayImage.naturalHeight || 100;
+          const maxW = canvases[0].width * 0.5;
+          if (overlayState.width > maxW) {
+            const ratio = maxW / overlayState.width;
+            overlayState.width *= ratio;
+            overlayState.height *= ratio;
+            overlayState.scale = 1;
+          }
+        }
+        overlayState.x = (canvases[0].width - overlayState.width * overlayState.scale) / 2;
+        overlayState.y = (canvases[0].height - overlayState.height * overlayState.scale) / 2;
+      }
+      bindCanvasEvents();
+      redrawAll(); // Redraw all canvases after setup to ensure everything is visible
+    }
+
+    // Bind mouse/touch events for illustration dragging and zooming on the first canvas
+    function bindCanvasEvents() {
+      const black = canvases[0]; // Interactivity is focused on the first (black) T-shirt canvas
+      if (!black) return;
+
+      // Mouse down event for dragging
+      black.addEventListener('mousedown', e => {
+        if (!overlayImage) return; // Only interact if an illustration is loaded
+        const r = black.getBoundingClientRect();
+        const mx = e.clientX - r.left; // Mouse X relative to canvas
+        const my = e.clientY - r.top;  // Mouse Y relative to canvas
+
+        // Calculate current illustration dimensions and position
+        const w = overlayState.width * overlayState.scale;
+        const h = overlayState.height * overlayState.scale;
+        const x = overlayState.x;
+        const y = overlayState.y;
+
+        // Check if mouse click is within the illustration boundaries
+        if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
+          overlayState.dragging = true;
+          overlayState.offsetX = mx - x; // Offset from top-left of illustration to mouse click
+          overlayState.offsetY = my - y;
+        }
+      });
+
+      // Mouse move event for dragging (global to allow dragging outside canvas bounds)
+      document.addEventListener('mousemove', e => {
+        if (!overlayState.dragging) return;
+        const r = black.getBoundingClientRect();
+        const mx = e.clientX - r.left;
+        const my = e.clientY - r.top;
+        overlayState.x = mx - overlayState.offsetX;
+        overlayState.y = my - overlayState.offsetY;
+        redrawAll(); // Redraw all canvases with new position
+      });
+
+      // Mouse up event to stop dragging (global)
+      document.addEventListener('mouseup', () => { overlayState.dragging = false; });
+
+      // Mouse wheel event for zooming
+      black.addEventListener('wheel', e => {
+        e.preventDefault(); // Prevent page scrolling
+        if (!overlayImage) return;
+
+        const d = e.deltaY < 0 ? 0.05 : -0.05; // Determine zoom direction and amount
+        overlayState.scale = Math.min(Math.max(overlayState.scale + d, 0.1), 3); // Limit scale between 0.1 and 3
+        redrawAll(); // Redraw all canvases with new scale
+      });
+    }
+
+    // Redraw all canvases with the current T-shirt image and overlay illustration
+    function redrawAll() {
+      canvases.forEach((c, idx) => {
+        const ctx = canvasesCtx[idx];
+        const img = tshirtImages[idx];
+        // Ensure canvas is cleared before redrawing
+        ctx.clearRect(0, 0, c.width, c.height);
+
+        if (img && img.complete && img.naturalWidth > 0) { // Check if image is loaded and valid
+          ctx.drawImage(img, 0, 0); // Draw T-shirt base image
+        } else {
+          // If image failed, redraw the fallback placeholder
+          ctx.fillStyle = '#ccc';
+          ctx.fillRect(0, 0, c.width, c.height);
+          ctx.fillStyle = '#666';
+          ctx.font = '20px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('圖片載入失敗', c.width / 2, c.height / 2);
+        }
+
+        if (overlayImage) {
+          const w = overlayState.width * overlayState.scale;
+          const h = overlayState.height * overlayState.scale;
+          ctx.drawImage(overlayImage, overlayState.x, overlayState.y, w, h); // Draw overlay illustration
+        }
+      });
+    }
+
+    // Function to download selected images
+    function downloadImages() {
+      const code = document.getElementById('itemCode').value.trim();
+      if (!code) {
+        console.warn('請先輸入圖號'); // Log to console as a fallback
+        return;
+      }
+
+      COLORS.forEach((c, idx) => {
+        // Only download if the checkbox is checked
+        if (!document.getElementById(`chk-${idx}`).checked) return;
+
+        canvases[idx].toBlob(blob => {
+          if (!blob) {
+            console.error(`Failed to create blob for canvas ${idx}`);
+            return;
+          }
+          const a = document.createElement('a');
+          a.download = `${code}-${c.name}.png`; // Set filename
+          a.href = URL.createObjectURL(blob);
+          document.body.append(a);
+          a.click(); // Programmatically click the link to trigger download
+          a.remove(); // Clean up the temporary link element
+          URL.revokeObjectURL(a.href); // Release object URL
+        });
+      });
+    }
+  </script>
+</body>
+</html>
