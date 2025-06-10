@@ -363,36 +363,26 @@
 
     // Handle changes in the item code input
     function onCodeChange(e) {
-      const code = e.target.value.trim();
-      const id = code.length >= 6 ? code.slice(0, 6) : ''; // Extract first 6 digits from itemCode for lookup ID
-      document.getElementById('supplierId').value = id; // Display the extracted ID
-      console.log('圖號 (itemCode):', code, '提取的供應商ID (extractedId):', id); // DEBUG: Log itemCode and extracted ID
+  const code = e.target.value.trim();
+  const id = code.length >= 6 ? code.slice(0, 6) : '';
+  document.getElementById('supplierId').value = id;
 
-      let name = ''; // To store supplier name
+  let name = '';
 
-      if (id && supplierData.length > 1) { // Ensure supplierData has data beyond just headers
-        console.log('開始在供應商資料中搜尋，資料行數:', supplierData.length); // DEBUG: Confirm search start
-        // Search for supplier data in the loaded Excel data
-        for (let i = 1; i < supplierData.length; i++) { // Start from index 1 to skip header row
-          const row = supplierData[i];
-          // Use default empty string if cell is null/undefined to prevent errors during trim/replace
-          const supplierIdFromB = String(row[1] || '').replace(/\s/g, '').trim(); // Get supplier ID from Column B (index 1) and clean it
-          const supplierNameFromD = String(row[3] || '').trim(); // Get supplier name from Column D (index 3) and clean it
+  if (id && supplierData.length > 1) {
+    for (let i = 1; i < supplierData.length; i++) {
+      const row = supplierData[i];
+      const supplierIdFromA = String(row[0] || '').replace(/\s/g, '').trim(); // A欄
+      const supplierNameFromB = String(row[1] || '').trim(); // B欄
 
-          console.log(`搜尋行 ${i}: B欄值 (清理後) - "${supplierIdFromB}", D欄值 (清理後) - "${supplierNameFromD}"`); // DEBUG: Log current row values
-
-          // Compare the extracted item code ID with the supplier ID from Column B
-          if (supplierIdFromB === id) { // Corrected variable name from cleanedSupplierIdFromB to supplierIdFromB
-            name = supplierNameFromD; // Assign the cleaned supplier name
-            console.log('找到匹配！供應商名稱:', name); // DEBUG: Log successful match
-            break; // Found a match, exit loop
-          }
-        }
-      } else {
-        console.log('未有圖號輸入或供應商資料未載入。'); // DEBUG: Info if no ID or data
-      }
-      document.getElementById('supplierName').value = name; // Update supplier name display
-    }
+      if (supplierIdFromA === id) {
+        name = supplierNameFromB;
+        break;
+      }
+    }
+  }
+  document.getElementById('supplierName').value = name;
+}
 
     // Load all T-shirt base images
     function loadAllImages() {
