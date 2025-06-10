@@ -21,17 +21,17 @@
       font-weight: 700;
     }
     #controls {
-      max-width: 800px;
-      margin: 0 auto 22px auto;
-      padding: 16px 32px 18px 32px;
-      background: rgba(255,255,255,0.85);
-      border-radius: 18px;
-      box-shadow: 0 4px 24px #b4d3fd22;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 18px 22px;
-      align-items: center;
-    }
+  max-width: 800px;
+  margin: 0 auto 22px auto;
+  padding: 16px 32px 18px 32px;
+  background: rgba(255,255,255,0.85);
+  border-radius: 18px;
+  box-shadow: 0 4px 24px #b4d3fd22;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 22px;
+  align-items: center;
+}
     #controls label {
       font-size: 15px;
       margin-bottom: 3px;
@@ -176,14 +176,6 @@
     <div>
       <label for="itemCode">圖號：</label>
       <input type="text" id="itemCode" placeholder="輸入完整圖號 (例：103380009)" />
-    </div>
-    <div>
-      <label for="supplierId">供應商ID：</label>
-      <input type="text" id="supplierId" readonly />
-    </div>
-    <div>
-      <label for="supplierName">供應商：</label>
-      <input type="text" id="supplierName" readonly />
     </div>
     <div>
       <label for="uploadIllustration">上傳插畫 (PNG)：</label>
